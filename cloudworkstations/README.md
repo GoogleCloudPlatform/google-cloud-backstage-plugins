@@ -20,18 +20,18 @@ Installation of the following packages are needed before building:
 ```bash
 mkdir ./backstage-local-plugins-install
 cd ./backstage-local-plugins-install
-git clone git@github.com:GoogleCloudPlatform/platform-engineering.git
+git clone git@github.com:GoogleCloudPlatform/google-cloud-backstage-plugins.git
 ```
 
 ### Build the plugin
 
 ```bash
-cd ./platform-engineering/google-cloud-backstage-plugins/cloudworkstations
+cd ./google-cloud-backstage-plugins/cloudworkstations
 yarn install
 yarn clean
 yarn tsc
 yarn build
-rm -rf node_modules (avoid overriding the peer deps)
+rm -rf node_modules # (avoid overriding the peer deps)
 ```
 
 ### Go to the backstage app local directory and install the plugin
