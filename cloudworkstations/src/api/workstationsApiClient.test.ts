@@ -59,6 +59,23 @@ describe('GCP CloudWorkstations API Client', () => {
       'projects/analog-object-410617/locations//workstationClusters/cluster-lr603ul5/workstationConfigs/config-lr6tst42',
       'projects/analog-object-410617/locations/us-east1/workstationClusters//workstationConfigs/config-lr6tst42',
       'projects/analog-object-410617/locations/us-east1/workstationClusters/cluster-lr603ul5/workstationConfigs/',
+      'projects/p/locations/l/workstationClusters/c/workstationConfigs/x#',
+      'projects/p/locations/l/workstationClusters/c/workstationConfigs/x?foo=bar',
+      'projects/p/locations/l/workstationClusters/c/workstationConfigs/x&foo=bar',
+      'projects/p/locations/l/workstationClusters/c/workstationConfigs/x/extra',
+      'projects/p/locations/l/workstationClusters/c/workstationConfigs/x/../../../../../../../../../v1/projects/victim/locations/l/workstationClusters/c/workstationConfigs/cfg/workstations/ws:stop?',
+      'projects/p/locations/l/workstationClusters/c/workstationConfigs/x:testIamPermissions',
+      'projects/p/locations/l/workstationClusters/c/workstationConfigs/x\n',
+      'projects/p?a=1/locations/l/workstationClusters/c/workstationConfigs/x',
+      'projects/p#frag/locations/l/workstationClusters/c/workstationConfigs/x',
+      'projects/../locations/l/workstationClusters/c/workstationConfigs/x',
+      'projects/p@evil/locations/l/workstationClusters/c/workstationConfigs/x',
+      'projects/p%2f../locations/l/workstationClusters/c/workstationConfigs/x',
+      'projects/p/locations/l/workstationClusters/c%23/workstationConfigs/x',
+      'projects/p/locations/l/workstationClusters/c/workstationConfigs/x%3F',
+      'projects/P/locations/l/workstationClusters/c/workstationConfigs/x',
+      'projects/p/locations/US-EAST1/workstationClusters/c/workstationConfigs/x',
+      'prefix/projects/p/locations/l/workstationClusters/c/workstationConfigs/x',
     ];
     for (const testValue of testValues) {
       expect(client.validWorkstationsConfigString(testValue)).toBeFalsy();
@@ -69,6 +86,60 @@ describe('GCP CloudWorkstations API Client', () => {
     expect(
       client.validWorkstationsConfigString(workstationsConfigString),
     ).toBeTruthy();
+    expect(
+      client.validWorkstationsConfigString(
+        'projects/p-1/locations/us-east1/workstationClusters/Cluster-1/workstationConfigs/Config-2',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('should reject invalid workstation configs and names before calling fetch or auth', async () => {
+    const invalidConfigs = [
+      'projects/p/locations/l/workstationClusters/c/workstationConfigs/x#',
+      'projects/p/locations/l/workstationClusters/c/workstationConfigs/x/../../../../v1/projects/victim/locations/l/workstationClusters/c/workstationConfigs/cfg/workstations/ws:stop?',
+      'projects/p/locations/l/workstationClusters/c/workstationConfigs/x?a=b',
+      'projects/p@evil/locations/l/workstationClusters/c/workstationConfigs/x',
+      'projects/p/locations/l/workstationClusters/c/workstationConfigs/x%2f..',
+    ];
+
+    for (const invalidConfig of invalidConfigs) {
+      await expect(
+        client.getWorkstationsIAmPermissions(invalidConfig),
+      ).rejects.toThrow();
+      await expect(
+        client.getWorkstationConfigDetails(invalidConfig),
+      ).rejects.toThrow();
+      await expect(client.getWorkstations(invalidConfig)).rejects.toThrow();
+      await expect(client.createWorkstation(invalidConfig)).rejects.toThrow();
+      await expect(
+        client.startWorkstation(invalidConfig, 'testname'),
+      ).rejects.toThrow();
+      await expect(
+        client.stopWorkstation(invalidConfig, 'testname'),
+      ).rejects.toThrow();
+    }
+
+    const invalidNames = [
+      '',
+      '../ws',
+      'ws#frag',
+      'ws?a=1',
+      'ws@evil',
+      'ws%2f..',
+      'ws:stop',
+    ];
+
+    for (const invalidName of invalidNames) {
+      await expect(
+        client.startWorkstation(workstationsConfigString, invalidName),
+      ).rejects.toThrow();
+      await expect(
+        client.stopWorkstation(workstationsConfigString, invalidName),
+      ).rejects.toThrow();
+    }
+
+    expect(fetchApiMock.fetch).not.toHaveBeenCalled();
+    expect(googleOAuthApiMock.getAccessToken).not.toHaveBeenCalled();
   });
 
   it('should call valid google cloud workstations iam granted permissions retrieval endpoint', async () => {
@@ -76,9 +147,7 @@ describe('GCP CloudWorkstations API Client', () => {
     const iamPermissions = Object.values(IAM_WORKSTATIONS_PERMISSION);
     worker.use(
       http.post(
-        encodeURI(
-          `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationsConfigString}:testIamPermissions`,
-        ),
+        `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationsConfigString}:testIamPermissions`,
         async ({ request }) => {
           expect(request.headers.get('Authorization')).toBe(`Bearer token`);
           expect(request.mode).toBe('cors');
@@ -96,9 +165,7 @@ describe('GCP CloudWorkstations API Client', () => {
     expect.assertions(2);
     worker.use(
       http.get(
-        encodeURI(
-          `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationsConfigString}`,
-        ),
+        `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationsConfigString}`,
         async ({ request }) => {
           expect(request.headers.get('Authorization')).toBe(`Bearer token`);
           expect(request.mode).toBe('cors');
@@ -134,9 +201,7 @@ describe('GCP CloudWorkstations API Client', () => {
     expect.assertions(2);
     worker.use(
       http.get(
-        encodeURI(
-          `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationsConfigString}/workstations:listUsable`,
-        ),
+        `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationsConfigString}/workstations:listUsable`,
         async ({ request }) => {
           expect(request.headers.get('Authorization')).toBe(`Bearer token`);
           expect(request.mode).toBe('cors');
@@ -161,9 +226,7 @@ describe('GCP CloudWorkstations API Client', () => {
     expect.assertions(2);
     worker.use(
       http.post(
-        encodeURI(
-          `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationsConfigString}/workstations?workstationId=workstation-${Date.now()}`,
-        ),
+        `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationsConfigString}/workstations?workstationId=workstation-${Date.now()}`,
         async ({ request }) => {
           expect(request.headers.get('Authorization')).toBe(`Bearer token`);
           expect(request.mode).toBe('cors');
@@ -178,9 +241,7 @@ describe('GCP CloudWorkstations API Client', () => {
     expect.assertions(2);
     worker.use(
       http.post(
-        encodeURI(
-          `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationsConfigString}/workstations/testname:start`,
-        ),
+        `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationsConfigString}/workstations/testname:start`,
         async ({ request }) => {
           expect(request.headers.get('Authorization')).toBe(`Bearer token`);
           expect(request.mode).toBe('cors');
@@ -195,9 +256,7 @@ describe('GCP CloudWorkstations API Client', () => {
     expect.assertions(2);
     worker.use(
       http.post(
-        encodeURI(
-          `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationsConfigString}/workstations/testname:stop`,
-        ),
+        `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationsConfigString}/workstations/testname:stop`,
         async ({ request }) => {
           expect(request.headers.get('Authorization')).toBe(`Bearer token`);
           expect(request.mode).toBe('cors');
@@ -213,9 +272,7 @@ describe('GCP CloudWorkstations API Client', () => {
 
     worker.use(
       http.post(
-        encodeURI(
-          `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationsConfigString}/workstations/testname:stop`,
-        ),
+        `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationsConfigString}/workstations/testname:stop`,
         async () => {
           return HttpResponse.json({
             error: { message: 'google apis response error' },
