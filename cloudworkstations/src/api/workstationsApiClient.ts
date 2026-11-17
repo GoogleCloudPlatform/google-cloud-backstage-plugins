@@ -23,7 +23,15 @@ export const GCP_CLOUDWORKSTATIONS_API_URL =
   'https://workstations.googleapis.com/v1';
 
 export const GCP_CLOUDWORKSTATIONS_CONFIG_ANNOTATION_PATTERN =
-  '^projects/[^/]+/locations/[^/]+/workstationClusters/[^/]+/workstationConfigs/[^/]+';
+  '^projects/[a-z0-9-]+/locations/[a-z0-9-]+/workstationClusters/[a-zA-Z0-9-]+/workstationConfigs/[a-zA-Z0-9-]+$';
+
+const WORKSTATION_CONFIG_REGEX = new RegExp(
+  GCP_CLOUDWORKSTATIONS_CONFIG_ANNOTATION_PATTERN,
+);
+
+const WORKSTATION_NAME_REGEX = /^[a-zA-Z0-9-]+$/;
+
+const FORBIDDEN_ANNOTATION_SUBSTRINGS = ['?', '#', '..', '@', '%'];
 
 /** @public */
 export class WorkstationsApiClient implements CloudWorkstationsApi {
@@ -32,10 +40,17 @@ export class WorkstationsApiClient implements CloudWorkstationsApi {
   );
 
   validWorkstationsConfigString(configString: string) {
-    return new RegExp(
-      GCP_CLOUDWORKSTATIONS_CONFIG_ANNOTATION_PATTERN,
-      'g',
-    ).test(configString);
+    if (typeof configString !== 'string') {
+      return false;
+    }
+    if (
+      FORBIDDEN_ANNOTATION_SUBSTRINGS.some(substring =>
+        configString.includes(substring),
+      )
+    ) {
+      return false;
+    }
+    return WORKSTATION_CONFIG_REGEX.test(configString);
   }
 
   constructor(
@@ -44,21 +59,63 @@ export class WorkstationsApiClient implements CloudWorkstationsApi {
     private readonly errorApi: ErrorApi,
   ) {}
 
+  private buildWorkstationsUrl(
+    workstationConfig: string,
+    options?: {
+      suffix?: string;
+      workstationName?: string;
+      queryParams?: Record<string, string>;
+    },
+  ): string {
+    if (!this.validWorkstationsConfigString(workstationConfig)) {
+      throw new Error(
+        `Invalid workstations config entity annotation value: ${workstationConfig}. Expected value pattern: ${GCP_CLOUDWORKSTATIONS_CONFIG_ANNOTATION_PATTERN}`,
+      );
+    }
+
+    const segments = workstationConfig.split('/').map(encodeURIComponent);
+
+    if (options?.workstationName !== undefined) {
+      const workstationName = options.workstationName;
+      if (
+        typeof workstationName !== 'string' ||
+        FORBIDDEN_ANNOTATION_SUBSTRINGS.some(substring =>
+          workstationName.includes(substring),
+        ) ||
+        !WORKSTATION_NAME_REGEX.test(workstationName)
+      ) {
+        throw new Error(`Invalid workstation name: ${workstationName}`);
+      }
+      segments.push('workstations', encodeURIComponent(workstationName));
+    }
+
+    const url = new URL(GCP_CLOUDWORKSTATIONS_API_URL);
+    const basePath = url.pathname.replace(/\/+$/, '');
+    const suffix = options?.suffix ?? '';
+    url.pathname = `${basePath}/${segments.join('/')}${suffix}`;
+
+    if (options?.queryParams) {
+      for (const [key, value] of Object.entries(options.queryParams)) {
+        url.searchParams.set(key, value);
+      }
+    }
+
+    return url.toString();
+  }
+
   async getWorkstationsIAmPermissions(workstationConfig: string) {
+    const url = this.buildWorkstationsUrl(workstationConfig, {
+      suffix: ':testIamPermissions',
+    });
     const response = await this.handleCloudWorkstationsApiCallResponse(
-      this.fetchApi.fetch(
-        encodeURI(
-          `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationConfig}:testIamPermissions`,
-        ),
-        {
-          mode: 'cors',
-          headers: await this.getHeaders(),
-          method: 'POST',
-          body: JSON.stringify({
-            permissions: this.IAM_PERMISSIONS_GRANTS,
-          }),
-        },
-      ),
+      this.fetchApi.fetch(url, {
+        mode: 'cors',
+        headers: await this.getHeaders(),
+        method: 'POST',
+        body: JSON.stringify({
+          permissions: this.IAM_PERMISSIONS_GRANTS,
+        }),
+      }),
     );
     return (response as Record<string, any>)
       ?.permissions as IAM_WORKSTATIONS_PERMISSION[];
@@ -67,45 +124,42 @@ export class WorkstationsApiClient implements CloudWorkstationsApi {
   async getWorkstationConfigDetails(
     workstationConfig: string,
   ): Promise<WorkstationConfig> {
+    const url = this.buildWorkstationsUrl(workstationConfig);
     return (await this.handleCloudWorkstationsApiCallResponse(
-      this.fetchApi.fetch(
-        encodeURI(`${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationConfig}`),
-        {
-          mode: 'cors',
-          headers: await this.getHeaders(),
-        },
-      ),
+      this.fetchApi.fetch(url, {
+        mode: 'cors',
+        headers: await this.getHeaders(),
+      }),
     )) as WorkstationConfig;
   }
 
   async getWorkstations(workstationConfig: string): Promise<Workstation[]> {
+    const url = this.buildWorkstationsUrl(workstationConfig, {
+      suffix: '/workstations:listUsable',
+    });
     const response = await this.handleCloudWorkstationsApiCallResponse(
-      this.fetchApi.fetch(
-        encodeURI(
-          `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationConfig}/workstations:listUsable`,
-        ),
-        {
-          mode: 'cors',
-          headers: await this.getHeaders(),
-        },
-      ),
+      this.fetchApi.fetch(url, {
+        mode: 'cors',
+        headers: await this.getHeaders(),
+      }),
     );
 
     return (response as Record<string, any>)?.workstations;
   }
 
   async createWorkstation(workstationConfig: string): Promise<void> {
+    const url = this.buildWorkstationsUrl(workstationConfig, {
+      suffix: '/workstations',
+      queryParams: {
+        workstationId: `workstation-${Date.now().toString()}`,
+      },
+    });
     await this.handleCloudWorkstationsApiCallResponse(
-      this.fetchApi.fetch(
-        encodeURI(
-          `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationConfig}/workstations?workstationId=${`workstation-${Date.now().toString()}`}`,
-        ),
-        {
-          mode: 'cors',
-          method: 'POST',
-          headers: await this.getHeaders(),
-        },
-      ),
+      this.fetchApi.fetch(url, {
+        mode: 'cors',
+        method: 'POST',
+        headers: await this.getHeaders(),
+      }),
     );
   }
 
@@ -113,17 +167,16 @@ export class WorkstationsApiClient implements CloudWorkstationsApi {
     workstationConfig: string,
     workstationName: string,
   ): Promise<void> {
+    const url = this.buildWorkstationsUrl(workstationConfig, {
+      workstationName,
+      suffix: ':start',
+    });
     await this.handleCloudWorkstationsApiCallResponse(
-      this.fetchApi.fetch(
-        encodeURI(
-          `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationConfig}/workstations/${workstationName}:start`,
-        ),
-        {
-          mode: 'cors',
-          method: 'POST',
-          headers: await this.getHeaders(),
-        },
-      ),
+      this.fetchApi.fetch(url, {
+        mode: 'cors',
+        method: 'POST',
+        headers: await this.getHeaders(),
+      }),
     );
   }
 
@@ -131,17 +184,16 @@ export class WorkstationsApiClient implements CloudWorkstationsApi {
     workstationConfig: string,
     workstationName: string,
   ): Promise<void> {
+    const url = this.buildWorkstationsUrl(workstationConfig, {
+      workstationName,
+      suffix: ':stop',
+    });
     await this.handleCloudWorkstationsApiCallResponse(
-      this.fetchApi.fetch(
-        encodeURI(
-          `${GCP_CLOUDWORKSTATIONS_API_URL}/${workstationConfig}/workstations/${workstationName}:stop`,
-        ),
-        {
-          mode: 'cors',
-          method: 'POST',
-          headers: await this.getHeaders(),
-        },
-      ),
+      this.fetchApi.fetch(url, {
+        mode: 'cors',
+        method: 'POST',
+        headers: await this.getHeaders(),
+      }),
     );
   }
 
